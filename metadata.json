@@ -1,0 +1,5 @@
+{
+  "name": "Gemini RSS Feed Aggregator",
+  "description": "An intelligent RSS feed aggregator that uses Gemini to automatically categorize feeds with tags and provide insightful dashboard summaries of the news.",
+  "requestFramePermissions": []
+}
