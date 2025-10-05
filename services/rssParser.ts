@@ -34,16 +34,21 @@ export async function fetchAndParseRss(
 
   try {
     const response = await fetch(`${CORS_PROXY}${encodeURIComponent(feedUrl)}`);
+    
+    if (response.status === 404) throw new Error('Invalid URL: The requested feed was not found (404).');
+    if (response.status === 429) throw new Error('The feed might be rate-limiting requests, try refreshing later.');
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      throw new Error(`Invalid URL or network error (status: ${response.status}).`);
     }
+    
     const text = await response.text();
     const parser = new window.DOMParser();
     const xmlDoc = parser.parseFromString(text, 'text/xml');
 
     const errorNode = xmlDoc.querySelector('parsererror');
     if (errorNode) {
-        throw new Error('Failed to parse XML');
+        console.error('Parser Error:', errorNode.textContent);
+        throw new Error('Feed content is empty or malformed.');
     }
 
     const title = xmlDoc.querySelector('channel > title')?.textContent || 'Untitled Feed';
@@ -54,7 +59,28 @@ export async function fetchAndParseRss(
       const articleTitle = item.querySelector('title')?.textContent || '';
       const link = item.querySelector('link')?.textContent || item.querySelector('link')?.getAttribute('href') || '';
       const pubDate = item.querySelector('pubDate, published')?.textContent || new Date().toISOString();
-      const contentSnippet = item.querySelector('description, summary, content')?.textContent?.replace(/<[^>]*>?/gm, '').substring(0, 200) + '...' || '';
+      const contentSnippetRaw = item.querySelector('description, summary, content, content\\:encoded')?.textContent || '';
+      
+      let thumbnailUrl: string | undefined;
+      const mediaNamespace = (ns: string) => `http://search.yahoo.com/mrss/`;
+      const mediaThumbnail = item.querySelector('media\\:thumbnail, thumbnail');
+      if (mediaThumbnail) {
+          thumbnailUrl = mediaThumbnail.getAttribute('url') || undefined;
+      }
+      if (!thumbnailUrl) {
+          const enclosure = item.querySelector('enclosure[url]');
+          if (enclosure && enclosure.getAttribute('type')?.startsWith('image/')) {
+              thumbnailUrl = enclosure.getAttribute('url') || undefined;
+          }
+      }
+       if (!thumbnailUrl) {
+          const imgMatch = contentSnippetRaw.match(/<img[^>]+src="([^">]+)"/);
+          if (imgMatch && imgMatch[1]) {
+              thumbnailUrl = imgMatch[1];
+          }
+      }
+
+      const contentSnippet = contentSnippetRaw.replace(/<[^>]*>?/gm, '').substring(0, 200) + '...';
       const isoDate = new Date(pubDate).toISOString();
 
       items.push({
@@ -63,10 +89,15 @@ export async function fetchAndParseRss(
         pubDate,
         contentSnippet,
         isoDate,
-        feedName: title
+        feedName: title,
+        thumbnailUrl
       });
     });
     
+    if (items.length === 0 && !errorNode) {
+       throw new Error('Feed content is empty or malformed.');
+    }
+
     const parsedData: ParsedRss = { title, description, items };
     
     const cacheEntry: CacheEntry<ParsedRss> = {
@@ -78,6 +109,9 @@ export async function fetchAndParseRss(
     return parsedData;
   } catch (error) {
     console.error('Error fetching or parsing RSS feed:', error);
+    if (error instanceof Error) {
+        throw error;
+    }
     throw new Error('Could not fetch or parse the RSS feed. Please check the URL.');
   }
 }

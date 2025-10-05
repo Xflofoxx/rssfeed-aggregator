@@ -5,6 +5,8 @@ export interface Article {
   contentSnippet: string;
   isoDate: string;
   feedName: string;
+  thumbnailUrl?: string;
+  feedColor?: string;
 }
 
 export interface Feed {
@@ -12,6 +14,8 @@ export interface Feed {
   name: string;
   articles: Article[];
   tags: string[];
+  category?: string;
+  color?: string;
 }
 
 export interface ParsedRss {

@@ -13,6 +13,7 @@ interface SidebarProps {
   isLoading: boolean;
   addMultipleFeeds: (feeds: SuggestedFeed[]) => Promise<void>;
   feedStatus: Record<string, FeedStatus>;
+  updateFeedDetails: (url: string, details: { category?: string; color?: string }) => void;
 }
 
 const formatTimeAgo = (timestamp: number | null): string => {
@@ -73,6 +74,7 @@ const FeedFinder: React.FC<{ addMultipleFeeds: (feeds: SuggestedFeed[]) => Promi
         }
         setSuggestedFeeds([]);
         setSelectedFeeds([]);
+        setTopic('');
     };
 
     return (
@@ -99,7 +101,7 @@ const FeedFinder: React.FC<{ addMultipleFeeds: (feeds: SuggestedFeed[]) => Promi
             {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
 
             {suggestedFeeds.length > 0 && (
-                <div className="space-y-2 max-h-60 overflow-y-auto -mr-4 pr-4 py-2">
+                <div className="space-y-2 max-h-80 overflow-y-auto -mr-4 pr-4 py-2">
                     {suggestedFeeds.map((feed) => (
                         <div
                             key={feed.url}
@@ -130,7 +132,7 @@ const FeedFinder: React.FC<{ addMultipleFeeds: (feeds: SuggestedFeed[]) => Promi
     );
 };
 
-export const Sidebar: React.FC<SidebarProps> = ({ feeds, addFeed, removeFeed, allTags, filters, setFilters, isLoading, addMultipleFeeds, feedStatus }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ feeds, addFeed, removeFeed, allTags, filters, setFilters, isLoading, addMultipleFeeds, feedStatus, updateFeedDetails }) => {
   const [newFeedUrl, setNewFeedUrl] = useState('');
   
   const handleAddFeed = (e: React.FormEvent) => {
@@ -149,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ feeds, addFeed, removeFeed, al
   };
 
   return (
-    <aside className="fixed top-0 left-0 h-full w-full lg:w-80 bg-gray-800 text-white p-6 flex flex-col z-20 transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+    <aside className="w-96 bg-gray-800 text-white p-6 flex-col h-screen hidden lg:flex">
         <div className="flex items-center space-x-2 mb-8">
             <Rss className="text-blue-400" size={28}/>
             <h2 className="text-2xl font-bold">Feeds</h2>
@@ -211,29 +213,47 @@ export const Sidebar: React.FC<SidebarProps> = ({ feeds, addFeed, removeFeed, al
             
             <div>
                  <h3 className="text-sm font-medium text-gray-400 mb-3">Your Feeds</h3>
-                 <ul className="space-y-2">
+                 <ul className="space-y-3">
                      {feeds.map(feed => {
                         const status = feedStatus[feed.url];
                         const isRefreshing = status?.isRefreshing;
                         const lastRefreshed = status?.lastRefreshed;
 
                         return (
-                            <li key={feed.url} className="flex items-center bg-gray-700/50 rounded-md p-2 group gap-2">
-                                <span className="flex-1 text-sm truncate min-w-0" title={feed.name}>
-                                    {feed.name}
-                                </span>
-                                <div className="flex-shrink-0">
-                                    {isRefreshing ? (
-                                        <Loader2 size={14} className="animate-spin text-gray-400" />
-                                    ) : lastRefreshed ? (
-                                        <span className="text-xs text-gray-500 whitespace-nowrap" title={new Date(lastRefreshed).toLocaleString()}>
-                                            {formatTimeAgo(lastRefreshed)}
-                                        </span>
-                                    ) : null}
+                           <li key={feed.url} className="bg-gray-700/50 rounded-md p-3 group">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="flex-1 text-sm font-medium truncate min-w-0" title={feed.name}>
+                                        {feed.name}
+                                    </span>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                        {isRefreshing ? (
+                                            <Loader2 size={14} className="animate-spin text-gray-400" />
+                                        ) : lastRefreshed ? (
+                                            <span className="text-xs text-gray-500 whitespace-nowrap" title={new Date(lastRefreshed).toLocaleString()}>
+                                                {formatTimeAgo(lastRefreshed)}
+                                            </span>
+                                        ) : null}
+                                        <button onClick={() => removeFeed(feed.url)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-opacity">
+                                            <X size={16} />
+                                        </button>
+                                    </div>
                                 </div>
-                                <button onClick={() => removeFeed(feed.url)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 transition-opacity flex-shrink-0">
-                                    <X size={16} />
-                                </button>
+                                <div className="mt-3 grid grid-cols-5 gap-2 items-center">
+                                    <input
+                                        type="text"
+                                        value={feed.category || ''}
+                                        onChange={(e) => updateFeedDetails(feed.url, { category: e.target.value })}
+                                        placeholder="Category"
+                                        className="col-span-4 w-full bg-gray-600 text-white rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    />
+                                     <input
+                                        type="color"
+                                        value={feed.color || '#60A5FA'}
+                                        onChange={(e) => updateFeedDetails(feed.url, { color: e.target.value })}
+                                        className="w-full h-6 p-0 border-none rounded cursor-pointer bg-gray-600"
+                                        title="Select feed color"
+                                    />
+                                </div>
                             </li>
                         )
                      })}

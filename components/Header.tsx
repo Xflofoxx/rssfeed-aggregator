@@ -1,6 +1,6 @@
 
 import React, { useRef } from 'react';
-import { BookOpen, BarChart2, Download, Upload, RefreshCw } from 'lucide-react';
+import { BookOpen, BarChart2, Download, Upload, RefreshCw, LayoutGrid, List } from 'lucide-react';
 
 interface HeaderProps {
   currentView: 'articles' | 'dashboard';
@@ -8,9 +8,11 @@ interface HeaderProps {
   onImport: (file: File) => void;
   onExport: () => void;
   onRefresh: () => void;
+  viewMode: 'grid' | 'list';
+  setViewMode: (mode: 'grid' | 'list') => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView, onImport, onExport, onRefresh }) => {
+export const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView, onImport, onExport, onRefresh, viewMode, setViewMode }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportClick = () => {
@@ -52,6 +54,28 @@ export const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView, onI
                 <span>Dashboard</span>
               </button>
             </div>
+             {currentView === 'articles' && (
+              <div className="p-1 bg-gray-200 rounded-lg flex items-center ml-2">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  title="Grid View"
+                  className={`p-2 rounded-md transition-colors ${
+                    viewMode === 'grid' ? 'bg-white text-blue-600 shadow' : 'text-gray-600 hover:bg-gray-300'
+                  }`}
+                >
+                  <LayoutGrid size={16} />
+                </button>
+                <button
+                   onClick={() => setViewMode('list')}
+                   title="List View"
+                   className={`p-2 rounded-md transition-colors ${
+                    viewMode === 'list' ? 'bg-white text-blue-600 shadow' : 'text-gray-600 hover:bg-gray-300'
+                  }`}
+                >
+                  <List size={16} />
+                </button>
+              </div>
+            )}
           </div>
           <div className="flex items-center space-x-2">
             <button onClick={onRefresh} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Refresh Feeds">

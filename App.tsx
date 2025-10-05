@@ -14,6 +14,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<'articles' | 'dashboard'>('articles');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [filters, setFilters] = useState<Filter>({ searchTerm: '', tags: [] });
   const [feedStatus, setFeedStatus] = useState<Record<string, FeedStatus>>({});
 
@@ -22,13 +23,14 @@ const App: React.FC = () => {
     if (savedFeeds) {
       const parsedFeeds: Omit<Feed, 'articles'>[] = JSON.parse(savedFeeds);
       if (parsedFeeds.length > 0) {
+        setFeeds(parsedFeeds.map(f => ({...f, articles: []}))); // Set initial feeds
         refreshAllFeeds(parsedFeeds);
       }
     }
   }, []);
 
   const saveFeedsToLocalStorage = (feedsToSave: Omit<Feed, 'articles'>[]) => {
-    localStorage.setItem('rss-feeds', JSON.stringify(feedsToSave.map(({ url, name, tags }) => ({ url, name, tags }))));
+    localStorage.setItem('rss-feeds', JSON.stringify(feedsToSave.map(({ url, name, tags, category, color }) => ({ url, name, tags, category, color }))));
   };
   
   const refreshAllFeeds = useCallback(async (feedsToRefresh: Omit<Feed, 'articles'>[], forceRefresh = false) => {
@@ -54,6 +56,7 @@ const App: React.FC = () => {
             };
           } catch (e) {
             console.error(`Failed to refresh feed: ${feed.url}`, e);
+            setError(`Failed to refresh ${feed.name || feed.url}.`);
             setFeedStatus(prev => ({ ...prev, [feed.url]: { ...(prev[feed.url] || { lastRefreshed: null }), isRefreshing: false } }));
             return null; // Return null for failed feeds
           }
@@ -66,7 +69,12 @@ const App: React.FC = () => {
       const updatedFeeds = [...unchangedFeeds, ...successfulFeeds];
 
       setFeeds(updatedFeeds);
-      const allArticles = updatedFeeds.flatMap(feed => feed.articles);
+      const allArticles = updatedFeeds.flatMap(feed => 
+        feed.articles.map(article => ({
+            ...article,
+            feedColor: feed.color || '#60A5FA'
+        }))
+      );
       allArticles.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
       setArticles(allArticles);
       saveFeedsToLocalStorage(updatedFeeds);
@@ -96,15 +104,18 @@ const App: React.FC = () => {
         name: feedData.title,
         articles: feedData.items,
         tags,
+        category: 'Uncategorized',
+        color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}` // Random color
       };
       const updatedFeeds = [...feeds, newFeed];
       setFeeds(updatedFeeds);
-      const allArticles = updatedFeeds.flatMap(f => f.articles).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+      const allArticles = updatedFeeds.flatMap(f => f.articles.map(a => ({...a, feedColor: f.color}))).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
       setArticles(allArticles);
       saveFeedsToLocalStorage(updatedFeeds);
       setFeedStatus(prev => ({ ...prev, [url]: { isRefreshing: false, lastRefreshed: Date.now() } }));
     } catch (err) {
-      setError('Failed to add feed. Check the URL and try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to add feed. Check the URL and try again.';
+      setError(errorMessage);
       console.error(err);
       setFeedStatus(prev => ({ ...prev, [url]: { ...prev[url], isRefreshing: false } }));
     } finally {
@@ -135,7 +146,8 @@ const App: React.FC = () => {
 
     try {
       const processedFeeds = await Promise.all(
-        newFeedsInfo.map(async (feedInfo) => {
+        // Fix: Explicitly type the return value of the map's async function to `Promise<Feed | null>`. This ensures that the type of `processedFeeds` is `(Feed | null)[]`, which allows the type predicate `f is Feed` in the subsequent filter to work correctly.
+        newFeedsInfo.map(async (feedInfo): Promise<Feed | null> => {
           try {
             const feedData = await fetchAndParseRss(feedInfo.url, { forceRefresh: true });
             const name = feedInfo.name || feedData.title; 
@@ -146,6 +158,8 @@ const App: React.FC = () => {
               name: name,
               articles: feedData.items,
               tags,
+              category: 'Newly Added',
+              color: `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`
             };
           } catch (e) {
             console.error(`Failed to process feed: ${feedInfo.url}`, e);
@@ -161,14 +175,16 @@ const App: React.FC = () => {
         const updatedFeeds = [...feeds, ...successfulNewFeeds];
         setFeeds(updatedFeeds);
         
-        const allArticles = updatedFeeds.flatMap(f => f.articles).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+        const allArticles = updatedFeeds.flatMap(f => f.articles.map(a => ({...a, feedColor: f.color}))).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
         setArticles(allArticles);
         
         saveFeedsToLocalStorage(updatedFeeds);
       }
 
-      if (successfulNewFeeds.length < newFeedsInfo.length) {
-        setError("Some feeds could not be added. Please check their URLs.");
+       const failedCount = newFeedsInfo.length - successfulNewFeeds.length;
+      if (failedCount > 0) {
+        setError(`${failedCount} feed${failedCount > 1 ? 's' : ''} could not be added.`);
+        setTimeout(() => setError(null), 4000);
       }
 
     } catch (err) {
@@ -182,7 +198,7 @@ const App: React.FC = () => {
   const removeFeed = (url: string) => {
     const updatedFeeds = feeds.filter(feed => feed.url !== url);
     setFeeds(updatedFeeds);
-    const allArticles = updatedFeeds.flatMap(f => f.articles).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+    const allArticles = updatedFeeds.flatMap(f => f.articles.map(a => ({...a, feedColor: f.color}))).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
     setArticles(allArticles);
     saveFeedsToLocalStorage(updatedFeeds);
     setFeedStatus(prev => {
@@ -192,6 +208,19 @@ const App: React.FC = () => {
     });
   };
   
+  const updateFeedDetails = (url: string, details: { category?: string; color?: string }) => {
+    setFeeds(prevFeeds => {
+        const newFeeds = prevFeeds.map(feed => {
+            if (feed.url === url) {
+                return { ...feed, ...details };
+            }
+            return feed;
+        });
+        saveFeedsToLocalStorage(newFeeds);
+        return newFeeds;
+    });
+  };
+
   const allTags = useMemo(() => {
     const tagsSet = new Set<string>();
     feeds.forEach(feed => {
@@ -222,7 +251,7 @@ const App: React.FC = () => {
   }, [articles, filters, feeds]);
 
   const exportFeeds = () => {
-    const feedsToExport = feeds.map(({ url, name, tags }) => ({ url, name, tags }));
+    const feedsToExport = feeds.map(({ url, name, tags, category, color }) => ({ url, name, tags, category, color }));
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(feedsToExport, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
@@ -240,11 +269,18 @@ const App: React.FC = () => {
         if (typeof content === 'string') {
           const importedFeeds: Omit<Feed, 'articles'>[] = JSON.parse(content);
           // Basic validation
-          if (Array.isArray(importedFeeds) && importedFeeds.every(f => f.url && f.name && Array.isArray(f.tags))) {
+          if (Array.isArray(importedFeeds) && importedFeeds.every(f => f.url && f.name)) {
              const uniqueFeeds = importedFeeds.filter(
               (f) => !feeds.some((existing) => existing.url === f.url)
             );
-            await refreshAllFeeds([...feeds, ...uniqueFeeds], true);
+            // Add default category/color if missing
+            const feedsToLoad = uniqueFeeds.map(f => ({
+                tags: [],
+                ...f,
+                category: f.category || 'Imported',
+                color: f.color || `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`
+            }))
+            await refreshAllFeeds([...feeds, ...feedsToLoad], true);
           } else {
              setError('Invalid file format.');
           }
@@ -259,27 +295,18 @@ const App: React.FC = () => {
 
   return (
     <div className="bg-gray-100 min-h-screen text-gray-800">
-      <div className="flex">
-        <Sidebar
-          feeds={feeds}
-          addFeed={addFeed}
-          removeFeed={removeFeed}
-          allTags={allTags}
-          filters={filters}
-          setFilters={setFilters}
-          isLoading={isLoading}
-          addMultipleFeeds={addMultipleFeeds}
-          feedStatus={feedStatus}
-        />
-        <main className="flex-1 lg:ml-80">
+      <div className="flex h-screen">
+        <main className="flex-1 flex flex-col overflow-y-auto">
           <Header
             currentView={currentView}
             setCurrentView={setCurrentView}
             onImport={importFeeds}
             onExport={exportFeeds}
             onRefresh={() => refreshAllFeeds(feeds, true)}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
           />
-          <div className="p-4 md:p-6 lg:p-8">
+          <div className="p-4 md:p-6 lg:p-8 flex-1">
             {error && (
               <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
                 <strong className="font-bold">Error: </strong>
@@ -290,12 +317,24 @@ const App: React.FC = () => {
               </div>
             )}
             {currentView === 'articles' ? (
-              <ArticleList articles={filteredArticles} isLoading={isLoading} />
+              <ArticleList articles={filteredArticles} isLoading={isLoading} viewMode={viewMode} />
             ) : (
               <Dashboard articles={filteredArticles} />
             )}
           </div>
         </main>
+        <Sidebar
+          feeds={feeds}
+          addFeed={addFeed}
+          removeFeed={removeFeed}
+          allTags={allTags}
+          filters={filters}
+          setFilters={setFilters}
+          isLoading={isLoading}
+          addMultipleFeeds={addMultipleFeeds}
+          feedStatus={feedStatus}
+          updateFeedDetails={updateFeedDetails}
+        />
       </div>
     </div>
   );
