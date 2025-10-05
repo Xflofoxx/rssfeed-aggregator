@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
@@ -6,7 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { Header } from './components/Header';
 import { fetchAndParseRss } from './services/rssParser';
 import { generateTagsForFeed } from './services/geminiService';
-import type { Feed, Article, Filter } from './types';
+import type { Feed, Article, Filter, SuggestedFeed, FeedStatus } from './types';
 
 const App: React.FC = () => {
   const [feeds, setFeeds] = useState<Feed[]>([]);
@@ -16,6 +15,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [currentView, setCurrentView] = useState<'articles' | 'dashboard'>('articles');
   const [filters, setFilters] = useState<Filter>({ searchTerm: '', tags: [] });
+  const [feedStatus, setFeedStatus] = useState<Record<string, FeedStatus>>({});
 
   useEffect(() => {
     const savedFeeds = localStorage.getItem('rss-feeds');
@@ -31,14 +31,22 @@ const App: React.FC = () => {
     localStorage.setItem('rss-feeds', JSON.stringify(feedsToSave.map(({ url, name, tags }) => ({ url, name, tags }))));
   };
   
-  const refreshAllFeeds = useCallback(async (feedsToRefresh: Omit<Feed, 'articles'>[]) => {
+  const refreshAllFeeds = useCallback(async (feedsToRefresh: Omit<Feed, 'articles'>[], forceRefresh = false) => {
     setIsLoading(true);
     setError(null);
+    setFeedStatus(prev => {
+        const newStatus = { ...prev };
+        feedsToRefresh.forEach(f => {
+          newStatus[f.url] = { ...(newStatus[f.url] || { lastRefreshed: null }), isRefreshing: true };
+        });
+        return newStatus;
+      });
     try {
       const allFeedData = await Promise.all(
         feedsToRefresh.map(async (feed) => {
           try {
-            const feedData = await fetchAndParseRss(feed.url);
+            const feedData = await fetchAndParseRss(feed.url, { forceRefresh });
+            setFeedStatus(prev => ({ ...prev, [feed.url]: { isRefreshing: false, lastRefreshed: Date.now() } }));
             return {
               ...feed,
               name: feedData.title,
@@ -46,6 +54,7 @@ const App: React.FC = () => {
             };
           } catch (e) {
             console.error(`Failed to refresh feed: ${feed.url}`, e);
+            setFeedStatus(prev => ({ ...prev, [feed.url]: { ...(prev[feed.url] || { lastRefreshed: null }), isRefreshing: false } }));
             return null; // Return null for failed feeds
           }
         })
@@ -53,17 +62,21 @@ const App: React.FC = () => {
 
       const successfulFeeds = allFeedData.filter((feed): feed is Feed => feed !== null);
       
-      setFeeds(successfulFeeds);
-      const allArticles = successfulFeeds.flatMap(feed => feed.articles);
+      const unchangedFeeds = feeds.filter(f => !feedsToRefresh.some(ftr => ftr.url === f.url));
+      const updatedFeeds = [...unchangedFeeds, ...successfulFeeds];
+
+      setFeeds(updatedFeeds);
+      const allArticles = updatedFeeds.flatMap(feed => feed.articles);
       allArticles.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
       setArticles(allArticles);
+      saveFeedsToLocalStorage(updatedFeeds);
     } catch (err) {
       setError('Failed to refresh feeds.');
       console.error(err);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [feeds]);
 
 
   const addFeed = async (url: string) => {
@@ -73,8 +86,10 @@ const App: React.FC = () => {
     }
     setIsLoading(true);
     setError(null);
+    setFeedStatus(prev => ({ ...prev, [url]: { isRefreshing: true, lastRefreshed: null } }));
+
     try {
-      const feedData = await fetchAndParseRss(url);
+      const feedData = await fetchAndParseRss(url, { forceRefresh: true });
       const tags = await generateTagsForFeed(feedData.title, feedData.description, feedData.items.slice(0, 5));
       const newFeed: Feed = {
         url,
@@ -87,8 +102,77 @@ const App: React.FC = () => {
       const allArticles = updatedFeeds.flatMap(f => f.articles).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
       setArticles(allArticles);
       saveFeedsToLocalStorage(updatedFeeds);
+      setFeedStatus(prev => ({ ...prev, [url]: { isRefreshing: false, lastRefreshed: Date.now() } }));
     } catch (err) {
       setError('Failed to add feed. Check the URL and try again.');
+      console.error(err);
+      setFeedStatus(prev => ({ ...prev, [url]: { ...prev[url], isRefreshing: false } }));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const addMultipleFeeds = async (feedsToAdd: SuggestedFeed[]) => {
+    const newFeedsInfo = feedsToAdd.filter(
+      (f) => !feeds.some((existingFeed) => existingFeed.url === f.url)
+    );
+
+    if (newFeedsInfo.length === 0) {
+      setError('All selected feeds already exist.');
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    setFeedStatus(prev => {
+        const newStatus = { ...prev };
+        newFeedsInfo.forEach(f => {
+            newStatus[f.url] = { lastRefreshed: null, isRefreshing: true };
+        });
+        return newStatus;
+    });
+
+    try {
+      const processedFeeds = await Promise.all(
+        newFeedsInfo.map(async (feedInfo) => {
+          try {
+            const feedData = await fetchAndParseRss(feedInfo.url, { forceRefresh: true });
+            const name = feedInfo.name || feedData.title; 
+            const tags = await generateTagsForFeed(name, feedData.description, feedData.items.slice(0, 5));
+            setFeedStatus(prev => ({...prev, [feedInfo.url]: { isRefreshing: false, lastRefreshed: Date.now()}}));
+            return {
+              url: feedInfo.url,
+              name: name,
+              articles: feedData.items,
+              tags,
+            };
+          } catch (e) {
+            console.error(`Failed to process feed: ${feedInfo.url}`, e);
+            setFeedStatus(prev => ({ ...prev, [feedInfo.url]: { ...(prev[feedInfo.url] || { lastRefreshed: null }), isRefreshing: false } }));
+            return null;
+          }
+        })
+      );
+      
+      const successfulNewFeeds = processedFeeds.filter((f): f is Feed => f !== null);
+
+      if (successfulNewFeeds.length > 0) {
+        const updatedFeeds = [...feeds, ...successfulNewFeeds];
+        setFeeds(updatedFeeds);
+        
+        const allArticles = updatedFeeds.flatMap(f => f.articles).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
+        setArticles(allArticles);
+        
+        saveFeedsToLocalStorage(updatedFeeds);
+      }
+
+      if (successfulNewFeeds.length < newFeedsInfo.length) {
+        setError("Some feeds could not be added. Please check their URLs.");
+      }
+
+    } catch (err) {
+      setError('An error occurred while adding feeds.');
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -101,6 +185,11 @@ const App: React.FC = () => {
     const allArticles = updatedFeeds.flatMap(f => f.articles).sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
     setArticles(allArticles);
     saveFeedsToLocalStorage(updatedFeeds);
+    setFeedStatus(prev => {
+        const newStatus = {...prev};
+        delete newStatus[url];
+        return newStatus;
+    });
   };
   
   const allTags = useMemo(() => {
@@ -152,8 +241,10 @@ const App: React.FC = () => {
           const importedFeeds: Omit<Feed, 'articles'>[] = JSON.parse(content);
           // Basic validation
           if (Array.isArray(importedFeeds) && importedFeeds.every(f => f.url && f.name && Array.isArray(f.tags))) {
-            await refreshAllFeeds(importedFeeds);
-            saveFeedsToLocalStorage(importedFeeds);
+             const uniqueFeeds = importedFeeds.filter(
+              (f) => !feeds.some((existing) => existing.url === f.url)
+            );
+            await refreshAllFeeds([...feeds, ...uniqueFeeds], true);
           } else {
              setError('Invalid file format.');
           }
@@ -177,6 +268,8 @@ const App: React.FC = () => {
           filters={filters}
           setFilters={setFilters}
           isLoading={isLoading}
+          addMultipleFeeds={addMultipleFeeds}
+          feedStatus={feedStatus}
         />
         <main className="flex-1 lg:ml-80">
           <Header
@@ -184,7 +277,7 @@ const App: React.FC = () => {
             setCurrentView={setCurrentView}
             onImport={importFeeds}
             onExport={exportFeeds}
-            onRefresh={() => refreshAllFeeds(feeds)}
+            onRefresh={() => refreshAllFeeds(feeds, true)}
           />
           <div className="p-4 md:p-6 lg:p-8">
             {error && (

@@ -1,10 +1,37 @@
-
-import type { Article, ParsedRss } from '../types';
+import type { Article, ParsedRss, CacheEntry } from '../types';
 
 // Using a CORS proxy to fetch RSS feeds from the client-side
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const CACHE_PREFIX = 'rss-cache-';
+const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
-export async function fetchAndParseRss(feedUrl: string): Promise<ParsedRss> {
+export async function fetchAndParseRss(
+  feedUrl: string,
+  options: { forceRefresh?: boolean } = {}
+): Promise<ParsedRss> {
+  const { forceRefresh = false } = options;
+  const cacheKey = `${CACHE_PREFIX}${feedUrl}`;
+
+  if (!forceRefresh) {
+    const cachedItem = localStorage.getItem(cacheKey);
+    if (cachedItem) {
+      try {
+        const cacheEntry: CacheEntry<ParsedRss> = JSON.parse(cachedItem);
+        const isCacheValid = (Date.now() - cacheEntry.timestamp) < CACHE_DURATION_MS;
+        if (isCacheValid) {
+          // Re-assign feedName to articles from cache as it might not be stored with each article
+          cacheEntry.data.items.forEach(item => {
+              item.feedName = cacheEntry.data.title;
+          });
+          return cacheEntry.data;
+        }
+      } catch (e) {
+        console.warn('Failed to parse cache, fetching fresh data.', e);
+        localStorage.removeItem(cacheKey);
+      }
+    }
+  }
+
   try {
     const response = await fetch(`${CORS_PROXY}${encodeURIComponent(feedUrl)}`);
     if (!response.ok) {
@@ -39,8 +66,16 @@ export async function fetchAndParseRss(feedUrl: string): Promise<ParsedRss> {
         feedName: title
       });
     });
+    
+    const parsedData: ParsedRss = { title, description, items };
+    
+    const cacheEntry: CacheEntry<ParsedRss> = {
+      timestamp: Date.now(),
+      data: parsedData,
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(cacheEntry));
 
-    return { title, description, items };
+    return parsedData;
   } catch (error) {
     console.error('Error fetching or parsing RSS feed:', error);
     throw new Error('Could not fetch or parse the RSS feed. Please check the URL.');

@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type } from '@google/genai';
-import type { Article } from '../types';
+import type { Article, SuggestedFeed } from '../types';
 
 if (!process.env.API_KEY) {
     // This is a placeholder for development. The build environment will have the real key.
@@ -116,4 +115,53 @@ export async function generateDashboardInsights(
         console.error("Error generating dashboard insights with Gemini:", error);
         throw new Error("Failed to generate AI insights.");
     }
+}
+
+export async function findFeedsByTopic(topic: string): Promise<SuggestedFeed[]> {
+  try {
+    const prompt = `
+      You are an expert at finding RSS feeds. Find 5 high-quality, public, and active RSS feeds about "${topic}".
+      Provide the name of the publication and the full URL to the RSS feed.
+      Do not include feeds that are behind a paywall.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            feeds: {
+              type: Type.ARRAY,
+              description: "An array of 5 RSS feed suggestions.",
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: {
+                    type: Type.STRING,
+                    description: "The name of the publication or website."
+                  },
+                  url: {
+                    type: Type.STRING,
+                    description: "The full URL of the RSS feed, ending in .xml, /rss, /feed, etc."
+                  }
+                },
+                required: ['name', 'url']
+              }
+            }
+          },
+           required: ['feeds']
+        }
+      }
+    });
+
+    const jsonText = response.text;
+    const result = JSON.parse(jsonText);
+    return result.feeds || [];
+  } catch (error) {
+    console.error("Error finding feeds with Gemini:", error);
+    throw new Error("Failed to find feeds using AI.");
+  }
 }

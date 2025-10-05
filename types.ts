@@ -1,4 +1,3 @@
-
 export interface Article {
   title: string;
   link: string;
@@ -24,4 +23,19 @@ export interface ParsedRss {
 export interface Filter {
   searchTerm: string;
   tags: string[];
+}
+
+export interface SuggestedFeed {
+  name: string;
+  url: string;
+}
+
+export interface FeedStatus {
+  lastRefreshed: number | null;
+  isRefreshing: boolean;
+}
+
+export interface CacheEntry<T> {
+  timestamp: number;
+  data: T;
 }
